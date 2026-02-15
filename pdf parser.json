@@ -1,0 +1,603 @@
+{
+  "name": "pdf parser",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Submit your pdf",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "select file",
+              "fieldType": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -8304,
+        -160
+      ],
+      "id": "f680afa5-f318-4b3b-b9ba-1945608c79cf",
+      "name": "On form submission",
+      "webhookId": "fd7dc7fd-5878-4829-bc4a-f3b06acb720e"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "pdf-parser",
+          "mode": "list",
+          "cachedResultName": "pdf-parser"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -8048,
+        -368
+      ],
+      "id": "49e9dd36-7969-4301-af24-d8836dac50d4",
+      "name": "Pinecone Vector Store",
+      "credentials": {
+        "pineconeApi": {
+          "id": "OelreLcKGFgIKwCh",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-large",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -8080,
+        -144
+      ],
+      "id": "e0f0a936-6fa9-4aa8-a4e7-3c012a893adc",
+      "name": "Embeddings OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "PRHUixu2RIq6yfN2",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "textSplittingMode": "custom",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        -7952,
+        -144
+      ],
+      "id": "1fa9b4e3-3fb3-4170-a951-9241eb2d979d",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        -7856,
+        32
+      ],
+      "id": "d9efef2b-b1d5-414e-a610-6ae32a8f3d91",
+      "name": "Recursive Character Text Splitter"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "gpt-4"
+        },
+        "builtInTools": {},
+        "options": {
+          "textFormat": {
+            "textOptions": {
+              "type": "text"
+            }
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -7232,
+        -208
+      ],
+      "id": "106127c5-f168-4a4e-86e5-d5ba615943cb",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "PRHUixu2RIq6yfN2",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -7568,
+        -16
+      ],
+      "id": "98c487a5-7d03-401d-bef6-9aa1e05695a6",
+      "name": "When chat message received",
+      "webhookId": "7eee0d61-f044-4c9a-8d0a-391c8fabcb43"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Gmail Trigger').item.json.snippet }}",
+        "options": {
+          "systemMessage": "You are a helpful assistant that answers questions based on the context only. You do not have permission to generate anything by yourself without given context.\n\nWhen a user asks a question:\n1. Search the vector store (Pinecone) for relevant information\n2. Retrieve the FULL TEXT CONTENT from the matching documents\n3. Use that content to provide a detailed, specific answer\n4. If the retrieved content doesn't contain the answer, say \"I don't know based on the available documents\"\n5. Always cite which document the information came from\n6. If you found the answer in the context, create a natural human like concise and effective answer.\nDO NOT just say you found mentions without providing the actual content. You must extract and present the specific information from the retrieved text.\n\nDo not use your own internal knowledge to answer.\n\nDo not include citations, footnotes, or signs like [^1^] or [1].\n\nProvide the answer as plain text only. Do not use JSON formatting, curly braces, or labels like 'response:'.\"",
+          "maxIterations": 10
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -7232,
+        -464
+      ],
+      "id": "668ce4db-99c5-418d-9168-c14b885ede13",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Work with data from pinecone vector store",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "pdf-parser",
+          "mode": "list",
+          "cachedResultName": "pdf-parser"
+        },
+        "includeDocumentMetadata": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -7024,
+        -304
+      ],
+      "id": "67b2b3af-2033-475a-9207-024d640a8a5e",
+      "name": "Pinecone Vector Store1",
+      "credentials": {
+        "pineconeApi": {
+          "id": "OelreLcKGFgIKwCh",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-large",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -6816,
+        -176
+      ],
+      "id": "f6ee4acd-9e84-4587-a99d-44211a52596b",
+      "name": "Embeddings OpenAI1",
+      "credentials": {
+        "openAiApi": {
+          "id": "PRHUixu2RIq6yfN2",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemPromptTemplate": "You are a helpful assistant that answers questions based on the context only. You do not have permission to generate anything by yourself without given context.\n\nWhen a user asks a question:\n1. Search the vector store (Pinecone) for relevant information\n2. Retrieve the FULL TEXT CONTENT from the matching documents\n3. Use that content to provide a detailed, specific answer\n4. If the retrieved content doesn't contain the answer, say \"I don't know based on the available documents\"\n5. Always cite which document the information came from\n6. If you found the answer in the context, create a natural human like concise and effective answer.\nDO NOT just say you found mentions without providing the actual content. You must extract and present the specific information from the retrieved text.\n\nDo not use your own internal knowledge to answer.\n\nDo not include citations, footnotes, or signs like [^1^] or [1].\n\nProvide the answer as plain text only. Do not use JSON formatting, curly braces, or labels like 'response:'.\"\n----------------\nContext: {context}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainRetrievalQa",
+      "typeVersion": 1.7,
+      "position": [
+        -7248,
+        -16
+      ],
+      "id": "5fe66017-ffbc-47d2-841c-39f9e27110e3",
+      "name": "Question and Answer Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -7520,
+        272
+      ],
+      "id": "5e61725d-a718-4337-aeec-44d24743dcde",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Sz8ITsEqNBKaNjin",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.retrieverVectorStore",
+      "typeVersion": 1,
+      "position": [
+        -7312,
+        224
+      ],
+      "id": "ebaae42d-a249-4d56-a0e3-77733c9e2fc1",
+      "name": "Vector Store Retriever"
+    },
+    {
+      "parameters": {
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "pdf-parser",
+          "mode": "list",
+          "cachedResultName": "pdf-parser"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        -7040,
+        208
+      ],
+      "id": "19d32904-0965-4b15-9fbe-5d6432c9b528",
+      "name": "Pinecone Vector Store2",
+      "credentials": {
+        "pineconeApi": {
+          "id": "OelreLcKGFgIKwCh",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-large",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -7040,
+        368
+      ],
+      "id": "6ab330ed-5366-4813-b2f5-854aa63422b3",
+      "name": "Embeddings OpenAI2",
+      "credentials": {
+        "openAiApi": {
+          "id": "PRHUixu2RIq6yfN2",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            },
+            {}
+          ]
+        },
+        "filters": {}
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -7632,
+        -464
+      ],
+      "id": "716ef2e3-e01c-4177-adfb-b5e03f9b1cf9",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "KwsSSJumFQ5AbKbm",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": " return [{\n     json: {\n       senderEmail: $input.item.json.from,\n       senderName: $input.item.json.fromName,\n       question: $input.item.json.textPlain || $input.item.json.textHtml,                 \n       messageId: $input.item.json.messageId,\n       threadId: $input.item.json.threadId,\n       subject: $input.item.json.subject\n     }\n   }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7440,
+        -464
+      ],
+      "id": "bc0b2a65-b7fd-4a74-aab4-231249ceebd5",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Gmail Trigger').item.json.From }}",
+        "subject": "={{ $('Gmail Trigger').item.json.Subject }}",
+        "emailType": "text",
+        "message": "=Dear valued customer, \nThanks for your query.\n{{ $json.output }}\nBest Regards,\nMr X\n",
+        "options": {
+          "senderName": "By Mr X"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -6880,
+        -464
+      ],
+      "id": "b3b70e80-11ee-4304-ad84-65a65f3e6a87",
+      "name": "Send a message",
+      "webhookId": "2375d778-cb43-43ce-8ce6-bd97fc7ccb4d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "KwsSSJumFQ5AbKbm",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/speech",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"tts-1\",\n  \"input\": {{ JSON.stringify($('Question and Answer Chain').item.json.response) }},\n  \"voice\": \"alloy\",\n  \"response_format\": \"mp3\"\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audio"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -6896,
+        -16
+      ],
+      "id": "55ceac5e-b9d3-45fb-b84c-304595ab4f3b",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "yVvXhqfZXbmWgWxC",
+          "name": "Bearer Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recursive Character Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store": {
+      "main": [
+        []
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Store Retriever": {
+      "ai_retriever": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_retriever",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store2": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Vector Store Retriever",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI2": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store2",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Question and Answer Chain": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "7208ddff-eb83-45bf-a739-c7be6ec134f7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6cadef04614f697f2cdba25efad87ac7b23fffcbac039f03a5bf9e7c285bf10d"
+  },
+  "id": "rnjHpmkQJofRlssMRdj0B",
+  "tags": []
+}

@@ -1,0 +1,513 @@
+{
+  "name": "Daily Reporting Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 20
+            }
+          ]
+        }
+      },
+      "name": "Daily Trigger (8PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1984,
+        -432
+      ],
+      "id": "3ed4e4dc-68c5-4a34-a13d-0892c7b4e9b2"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo",
+          "mode": "list",
+          "cachedResultName": "Report Interface Example",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1403495474,
+          "mode": "list",
+          "cachedResultName": "sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo/edit#gid=1403495474"
+        },
+        "options": {}
+      },
+      "name": "Read Units Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -1728,
+        -432
+      ],
+      "id": "d04992ce-b7ad-499c-9af1-b7b06bd55395",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "VJwLcijBBVYzXu3g",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 2: DAILY LOGIC FILTER\n// ===========================\nconst rows = $input.all().map(i => i.json);\n\n// Configuration\nconst IS_TEST_MODE = true;\nconst TEST_DATE = \"Tuesday, June 24, 2025\";\n\n// Date Setup\nconst todayOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };\nconst realToday = new Date().toLocaleDateString('en-US', todayOptions);\nconst targetDate = IS_TEST_MODE ? TEST_DATE : realToday;\n\n// Filter Logic\nconst dailyJobs = rows.filter(r => {\n    const rowDate = (r[\"Scheduled Cleaning Day\"] || \"\").trim();\n    const status = (r[\"Status\"] || \"\").toLowerCase();\n\n    const isToday = rowDate === targetDate;\n    const isReclean = status.includes(\"reclean\") || status.includes(\"re-clean\");\n\n    return isToday || isReclean;\n});\n\nreturn dailyJobs.map(job => ({\n    json: job \n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        -432
+      ],
+      "id": "6e3422e1-6915-48c2-9e50-99d14d53c6d0",
+      "name": "Logic"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 1: STATS CALCULATOR (Counts Multiple Cleanings)\n// ====================================================\nconst allRows = $input.all().map(i => i.json);\n\n// 1. Initialize Counters\nlet totalUnits = allRows.length;\nlet cleanEventsProject = 0;  // Counts every time a unit was cleaned (1st + 2nd)\nlet carpetEventsProject = 0; // Counts every time a unit was carpeted (1st + 2nd)\nlet uniqueCleaned = 0;       // Counts unique units finished (for \"Remaining\" calc)\nlet uniqueCarpet = 0;\n\n// 2. Scan the whole project\nallRows.forEach(row => {\n    // A. Count Cleaning Events (Check if dates exist)\n    const date1 = row[\"Date Cleaned \"] || \"\";\n    const date2 = row[\"Second Cleaning, IF applicable\"] || \"\";\n    \n    if (date1.length > 2) cleanEventsProject++;\n    if (date2.length > 2) cleanEventsProject++;\n    \n    // B. Count Carpet Events\n    const cDate1 = row[\"Date Carpet Cleaned\"] || \"\";\n    const cDate2 = row[\"Second Carpet Cleaning, If applicable\"] || \"\";\n    \n    if (cDate1.length > 2) carpetEventsProject++;\n    if (cDate2.length > 2) carpetEventsProject++;\n\n    // C. Track Unique Completions (For the Pie Chart \"Not Done\" slice)\n    if (row[\"Cleaning Complete \"] === true) uniqueCleaned++;\n    if (row[\"Carpet Cleaned\"] === true) uniqueCarpet++;\n});\n\n// 3. Package the stats\nconst stats = {\n    total: totalUnits,\n    // For \"Total Project Work\" (Cleaners get paid for this)\n    cleaned_project_total: cleanEventsProject,\n    carpet_project_total: carpetEventsProject,\n    // For \"Remaining Work\" (Managers care about this)\n    remaining_clean: totalUnits - uniqueCleaned,\n    remaining_carpet: totalUnits - uniqueCarpet,\n    unique_clean: uniqueCleaned,\n    unique_carpet: uniqueCarpet\n};\n\n// 4. Attach to all rows\nreturn allRows.map(row => ({\n    json: { ...row, _project_stats: stats }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        -432
+      ],
+      "id": "92f97eb4-db2f-43a3-83da-a6835bbd639f",
+      "name": "calculating"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 3: HTML GENERATOR (Manager, Cleaner, AND Carpet)\n// ======================================================\nconst jobs = $input.all().map(i => i.json);\nconst stats = jobs.length > 0 ? jobs[0]._project_stats : { total: 0 };\n\n// 1. HELPERS: Charts & Breakdowns\nfunction getChart(label, done, total) {\n    const config = {\n        type: 'pie',\n        data: {\n            labels: [label, 'Remaining'],\n            datasets: [{ data: [done, Math.max(0, total - done)], backgroundColor: ['#4caf50', '#e0e0e0'] }]\n        },\n        options: { plugins: { datalabels: { display: true, color: 'white', font: { weight: 'bold' } } } }\n    };\n    return `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(config))}&w=200&h=120`;\n}\n\nfunction getBreakdown(jobList) {\n    const counts = {};\n    jobList.forEach(j => {\n        const type = j[\"Unit Type\"] || \"Unknown\";\n        counts[type] = (counts[type] || 0) + 1;\n    });\n    return Object.entries(counts).map(([type, count]) => `${count} ${type}`).join(', ');\n}\n\n// 2. CALCULATE TODAY'S STATS (Separately!)\nlet todayClean = 0;\nlet todayCarpet = 0;\n\njobs.forEach(j => {\n    if (j[\"Cleaning Complete \"] === true) todayClean++;\n    if (j[\"Carpet Cleaned\"] === true) todayCarpet++;\n});\n\n// 3. GENERATE CHARTS\nconst cleanChart = getChart(\"Cleaned\", stats.cleaned_project_total, stats.total);\nconst carpetChart = getChart(\"Carpet\", stats.carpet_project_total, stats.total);\n\n// 4. BUILD TABLE ROWS\nconst tableStyle = `width: 100%; border-collapse: collapse; font-family: Arial, 13px; margin-top: 10px;`;\nconst tdStyle = `padding: 8px; border: 1px solid #ddd;`;\n\nlet managerRows = \"\";\nlet cleanerRows = \"\";\nlet carpetRows = \"\"; // <--- NEW separate list\n\njobs.forEach(job => {\n    const cleanCheck = job[\"Cleaning Complete \"] === true ? \"✅\" : \"⬜\";\n    const carpetCheck = job[\"Carpet Cleaned\"] === true ? \"✅\" : \"⬜\";\n    const status = (job.Status || \"\").toLowerCase();\n    const color = status.includes(\"occupied\") || status.includes(\"reclean\") ? \"#d9534f\" : \"black\";\n\n    // Common Columns\n    const unitCols = `<td style=\"${tdStyle}\"><b>${job.Unit}</b></td><td style=\"${tdStyle}\">${job[\"Unit Type\"]}</td>`;\n\n    // Manager (Everything)\n    managerRows += `<tr>${unitCols}\n        <td style=\"${tdStyle} color: ${color}; font-weight: bold;\">${job.Status || \"-\"}</td>\n        <td style=\"${tdStyle} text-align:center;\">${cleanCheck} / ${carpetCheck}</td>\n        <td style=\"${tdStyle}\">${job.Notes || \"\"}</td>\n    </tr>`;\n\n    // Cleaner (Focus on Cleaning Checkbox)\n    cleanerRows += `<tr>${unitCols}\n        <td style=\"${tdStyle} text-align:center;\">${cleanCheck}</td>\n        <td style=\"${tdStyle}\">${job.Notes || \"\"}</td>\n    </tr>`;\n\n    // Carpet (Focus on Carpet Checkbox)\n    carpetRows += `<tr>${unitCols}\n        <td style=\"${tdStyle} text-align:center;\">${carpetCheck}</td>\n        <td style=\"${tdStyle}\">${job.Notes || \"\"}</td>\n    </tr>`;\n});\n\n// 5. ASSEMBLE REPORTS\n// ---------------------------------------------------------\n\n// A. MANAGER REPORT (2.1)\nconst manager_html = `\n<div style=\"font-family: Arial;\">\n    <h2 style=\"color: #2c3e50;\">Property Manager Daily Report</h2>\n    <div style=\"background: #f8f9fa; padding: 10px; border: 1px solid #ddd; display: flex; gap: 20px;\">\n        <div style=\"text-align:center;\"><img src=\"${cleanChart}\" /><br><small>Cleaning</small></div>\n        <div style=\"text-align:center;\"><img src=\"${carpetChart}\" /><br><small>Carpet</small></div>\n        <div style=\"font-size: 13px;\">\n            <b>TODAY:</b> ${todayClean} Clean | ${todayCarpet} Carpet<br>\n            <b>REMAINING:</b> ${stats.remaining_clean} Units\n        </div>\n    </div>\n    <table style=\"${tableStyle}\">\n        <tr style=\"background:#eee;\"><th>Unit</th><th>Type</th><th>Status</th><th>Clean/Carpet</th><th>Notes</th></tr>\n        ${managerRows}\n    </table>\n</div>`;\n\n// B. CLEANER REPORT (2.2)\nconst cleaner_html = `\n<div style=\"font-family: Arial;\">\n    <h2 style=\"color: #27ae60;\">🧹 Cleaner Task List</h2>\n    <div style=\"background: #e9f7ef; padding: 15px; border-left: 5px solid #27ae60;\">\n        <b>Today's Target:</b> ${todayClean} Units<br>\n        <b>Project Total:</b> ${stats.cleaned_project_total} Cleaned<br>\n        <b>Remaining:</b> ${stats.remaining_clean} Units<br>\n        <b>Breakdown:</b> ${getBreakdown(jobs)}\n    </div>\n    <table style=\"${tableStyle}\">\n        <tr style=\"background:#eee;\"><th>Unit</th><th>Type</th><th>Cleaned?</th><th>Notes</th></tr>\n        ${cleanerRows}\n    </table>\n</div>`;\n\n// C. CARPET REPORT (2.3) - <--- THIS IS THE NEW ONE\nconst carpet_html = `\n<div style=\"font-family: Arial;\">\n    <h2 style=\"color: #8e44ad;\">🧼 Carpet Technician Report</h2>\n    <div style=\"background: #f4ecf7; padding: 15px; border-left: 5px solid #8e44ad;\">\n        <b>Today's Target:</b> ${todayCarpet} Units<br>\n        <b>Project Total:</b> ${stats.carpet_project_total} Carpeted<br>\n        <b>Remaining:</b> ${stats.remaining_carpet} Units<br>\n        <b>Breakdown:</b> ${getBreakdown(jobs)}\n    </div>\n    <table style=\"${tableStyle}\">\n        <tr style=\"background:#eee;\"><th>Unit</th><th>Type</th><th>Carpeted?</th><th>Notes</th></tr>\n        ${carpetRows}\n    </table>\n</div>`;\n\nreturn [{\n    json: {\n        date: new Date().toDateString(),\n        manager_email_body: manager_html,\n        cleaner_email_body: cleaner_html,\n        carpet_email_body: carpet_html   // <--- Now you have this!\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        -432
+      ],
+      "id": "b4529505-60d7-4068-96db-d31bdc7f758f",
+      "name": "CHART & HTML GENERATOR"
+    },
+    {
+      "parameters": {
+        "sendTo": "himeltahsib2@gmail.com",
+        "subject": "Cleaner report",
+        "message": "={{ $json.cleaner_email_body }}",
+        "options": {}
+      },
+      "name": "Cleaner",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        -432
+      ],
+      "id": "44d83067-18e8-44df-b55a-acdbc9b8cb2a",
+      "webhookId": "702dde5d-5451-4f2f-93c4-7e3f1506aa44",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IXCxlAoJlKlxXQ69",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "abirarshadabedin@gmail.com",
+        "subject": "Manager Report",
+        "message": "={{ $json.manager_email_body }}",
+        "options": {}
+      },
+      "name": "Mannager",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -848,
+        -624
+      ],
+      "id": "ec10b5e8-4ee4-4ddf-abb4-cbe5bbc92bab",
+      "webhookId": "2269ed14-171b-4014-940e-413fe6e3969e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IXCxlAoJlKlxXQ69",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "abirarshadabedin@gmail.com",
+        "subject": "curpenter report",
+        "message": "={{ $json.carpet_email_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -848,
+        -256
+      ],
+      "id": "2664abed-202a-4d09-8d32-44d454926106",
+      "name": "Send a message",
+      "webhookId": "24ef17ea-3037-48bd-807c-9cdc8b03f762",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IXCxlAoJlKlxXQ69",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Daily Reporting Engine",
+        "height": 576,
+        "width": 1584
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2048,
+        -656
+      ],
+      "typeVersion": 1,
+      "id": "fc4219e6-32a1-4d52-852a-f90d95bb2de4",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo",
+          "mode": "list",
+          "cachedResultName": "Report Interface Example",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1403495474,
+          "mode": "list",
+          "cachedResultName": "sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1iHnigVB9P-LPvzJVTYpWWUAXBfwJsh8Cu7-5cteQouo/edit#gid=1403495474"
+        },
+        "options": {}
+      },
+      "name": "Read Units Sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -64,
+        -400
+      ],
+      "id": "0dffa0ef-91af-4f70-9cbc-5e24b41fa9c4",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "VJwLcijBBVYzXu3g",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 2: WEEKLY FILTER & FEES (Logic)\n// =====================================\nconst allRows = $input.all().map(i => i.json);\n\n// --- DEMO MODE SETTINGS ---\nconst today = new Date(\"2025-06-30\"); // DEMO DATE\nconst sevenDaysAgo = new Date(today);\nsevenDaysAgo.setDate(today.getDate() - 7);\n// --------------------------\n\nfunction isThisWeek(dateStr) {\n    if (!dateStr) return false;\n    const d = new Date(dateStr);\n    return !isNaN(d.getTime()) && d >= sevenDaysAgo && d <= today;\n}\n\n// 1. Filter for Weekly Jobs\nconst weeklyJobs = [];\nlet totalCleanerFee = 0;\nlet totalPropertyFee = 0;\n\nallRows.forEach(row => {\n    const cleanDate = row[\"Date Cleaned \"];\n    const carpetDate = row[\"Date Carpet Cleaned\"];\n\n    if (isThisWeek(cleanDate) || isThisWeek(carpetDate)) {\n        weeklyJobs.push(row);\n        \n        // 2. Calculate Money (Remove $ and ,)\n        const cFee = parseFloat((row[\"Excessive cleaning fee (Cleaners Pay)\"] || \"0\").toString().replace(/[$,]/g, ''));\n        const pFee = parseFloat((row[\"Excessive cleaning fee (Property Charge)\"] || \"0\").toString().replace(/[$,]/g, ''));\n        \n        if (!isNaN(cFee)) totalCleanerFee += cFee;\n        if (!isNaN(pFee)) totalPropertyFee += pFee;\n    }\n});\n\n// 3. Prepare Data for Next Node\n// We pass the \"Filtered List\" and the \"Money Stats\"\n// We also keep the \"Project Stats\" from Node 1\nreturn [{\n    json: {\n        date_start: sevenDaysAgo.toDateString(),\n        date_end: today.toDateString(),\n        jobs: weeklyJobs,\n        financials: {\n            cleaner_fee: totalCleanerFee.toFixed(2),\n            property_fee: totalPropertyFee.toFixed(2),\n            count: weeklyJobs.length\n        },\n        project_stats: allRows[0]._project_stats // Grab from backpack\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -400
+      ],
+      "id": "5ee79c6e-19a2-4396-94a5-f00d5fea2b8e",
+      "name": "Logic1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 1: PROJECT STATS (The Big Picture)\n// ========================================\nconst allRows = $input.all().map(i => i.json);\n\nlet projectTotalCleaned = 0;\nlet totalUnits = allRows.length;\n\n// Count how many are done (regardless of date)\nallRows.forEach(row => {\n    if ((row[\"Date Cleaned \"] || \"\").length > 2) {\n        projectTotalCleaned++;\n    }\n});\n\n// Calculate Remaining\nconst remaining = totalUnits - projectTotalCleaned;\n\n// Attach these stats to EVERY row (The Backpack method)\nreturn allRows.map(row => ({\n    json: {\n        ...row,\n        _project_stats: {\n            total: totalUnits,\n            cleaned: projectTotalCleaned,\n            remaining: remaining\n        }\n    }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        -400
+      ],
+      "id": "fdbdc868-95a2-4238-8f60-9556585ffa90",
+      "name": "calculating1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 3A: HTML SUMMARY GENERATOR\n// ===============================\nconst data = $input.first().json;\nconst jobs = data.jobs;\nconst financials = data.financials;\nconst project = data.project_stats;\n\n// 1. CALCULATE BREAKDOWN\nconst typeCounts = {};\njobs.forEach(j => { typeCounts[j[\"Unit Type\"]] = (typeCounts[j[\"Unit Type\"]] || 0) + 1; });\nconst breakdown = Object.entries(typeCounts).map(([k,v]) => `${v} ${k}`).join(', ');\n\n// 2. GENERATE HTML\nconst emailHTML = `\n<div style=\"font-family: Arial; color: #333;\">\n    <h2 style=\"color: #2c3e50;\">WEEKLY FINANCIAL REPORT</h2>\n    <p><b>Period:</b> ${data.date_start} to ${data.date_end}</p>\n    <div style=\"background: #f4f6f7; padding: 15px; border: 1px solid #ddd; border-radius: 5px;\">\n        <h3>💰 Weekly Financials</h3>\n        <table style=\"width: 100%; text-align: left;\">\n            <tr><th style=\"width:200px\">Units Completed:</th><td>${financials.count}</td></tr>\n            <tr><th>Cleaner Fees:</th><td>$${financials.cleaner_fee}</td></tr>\n            <tr><th>Property Charges:</th><td>$${financials.property_fee}</td></tr>\n        </table>\n    </div>\n    <div style=\"margin-top: 15px;\">\n        <b>Project Totals:</b> ${project.cleaned} Done | ${project.remaining} Remaining<br>\n        <b>This Week:</b> ${breakdown}\n    </div>\n    <p><i>The detailed QuickBooks CSV file is attached.</i></p>\n</div>\n`;\n\nreturn {\n    subject: `Weekly Finance Report - ${data.date_end}`,\n    email_body: emailHTML\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -400
+      ],
+      "id": "cf844d44-feab-47ad-a28f-1cfeacedbf97",
+      "name": "CHART & HTML GENERATOR1"
+    },
+    {
+      "parameters": {
+        "sendTo": "abirarshadabedin@gmail.com",
+        "subject": "=Manager {{ $('CHART & HTML GENERATOR1').item.json.subject }}",
+        "message": "={{ $('CHART & HTML GENERATOR1').item.json.email_body }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": ""
+              }
+            ]
+          }
+        }
+      },
+      "name": "Mannager1",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        -400
+      ],
+      "id": "c9d0997c-f789-4f89-8be0-d8128d23fa43",
+      "webhookId": "2269ed14-171b-4014-940e-413fe6e3969e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IXCxlAoJlKlxXQ69",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Weekly Report",
+        "height": 272,
+        "width": 1792
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -368,
+        -512
+      ],
+      "typeVersion": 1,
+      "id": "103c5f0e-a99f-4b29-a298-d41c29796fd6",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 20
+            }
+          ]
+        }
+      },
+      "name": "Weekly Triger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -400
+      ],
+      "id": "2ac0920f-0e58-4f08-bc3e-60607f25eada"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "={{ $json }}",
+        "options": {
+          "fileName": ""
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        -400
+      ],
+      "id": "68c06cec-7f97-4fb5-9f65-5c423422e3aa",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE 3B: CSV ROW PREP (Flat Data)\n// ================================\nconst data = $('Logic1').first().json;\n\n// This returns 127 clean items immediately\nreturn data.jobs.map(row => ({\n    json: {\n        \"Unit\": row.Unit,\n        \"Unit Type\": row[\"Unit Type\"],\n        \"Date Cleaned\": row[\"Date Cleaned \"],\n        \"Status\": row.Status,\n        \"Fee (Cleaner)\": row[\"Excessive cleaning fee (Cleaners Pay)\"] || \"0\",\n        \"Fee (Property)\": row[\"Excessive cleaning fee (Property Charge)\"] || \"0\",\n        \"Notes\": (row.Notes || \"\").replace(/\\n/g, \" \")\n    }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        -400
+      ],
+      "id": "1304c32d-6947-427c-afe7-9ba225f3500b",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Trigger (8PM)": {
+      "main": [
+        [
+          {
+            "node": "Read Units Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Units Sheet": {
+      "main": [
+        [
+          {
+            "node": "calculating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logic": {
+      "main": [
+        [
+          {
+            "node": "CHART & HTML GENERATOR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calculating": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHART & HTML GENERATOR": {
+      "main": [
+        [
+          {
+            "node": "Mannager",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cleaner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleaner": {
+      "main": [
+        []
+      ]
+    },
+    "Read Units Sheet1": {
+      "main": [
+        [
+          {
+            "node": "calculating1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logic1": {
+      "main": [
+        [
+          {
+            "node": "CHART & HTML GENERATOR1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "calculating1": {
+      "main": [
+        [
+          {
+            "node": "Logic1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CHART & HTML GENERATOR1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Triger": {
+      "main": [
+        [
+          {
+            "node": "Read Units Sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Mannager1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "ed559114-fa4d-4a1f-ba32-dbd82a240ff9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5cc985da1cf202f693cf83c9af748f9dc273d937c351baf5ad74c1f4020c33f9"
+  },
+  "id": "i8WFDXMn4iltVBSo",
+  "tags": []
+}
